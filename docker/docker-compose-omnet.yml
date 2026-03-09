@@ -1,0 +1,26 @@
+services:
+
+  omnet-server:
+    container_name: "${TAG_ORG}"
+    build:
+      context: "../${BUILD_DIR}"
+      dockerfile: "../docker/dockerfile-omnet"
+      no_cache: true
+      args:
+        OMNET_DOCKER_PORT: "${OMNET_DOCKER_PORT}"
+        OMNET_DOCKER_GITUSER: "${OMNET_DOCKER_GIT_USER}"
+        OMNET_DOCKER_GITSERVER: "${OMNET_DOCKER_GIT_SERVER}" 
+        OMNET_DOCKER_GITCLIENT: "${OMNET_DOCKER_GIT_CLIENT}"
+        OMNET_DOCKER_GITPASSWORD: "${OMNET_DOCKER_GIT_PASSWORD}"
+        OMNET_DOCKER_LOGGING_LEVEL: "${OMNET_DOCKER_LOGGING_LEVEL}"
+        OMNET_DOCKER_USER_PASSWORD: "${OMNET_DOCKER_USER_PASSWORD}"
+    image: "${TAG_PREFIX_OMNETSERVER}"
+    network_mode: "${OMNET_DOCKER_NETWORK_TYPE}"
+    ports:
+      - "22:22/tcp"
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "${OMNET_DOCKER_PORT}:${OMNET_DOCKER_PORT}/tcp"
+      - "3306:3306"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

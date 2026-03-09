@@ -1,0 +1,305 @@
+#!/bin/bash
+
+display_error_text() {
+  if [[ "$#" != "1" ]]
+  then 
+    echo "unknown error"
+    return 1
+  fi
+  case ${1} in 
+  1)
+  echo "too many args error"
+  ;;
+  2)
+  echo "invalid argument error"
+  ;;
+  3)
+  echo "variable not set"
+  ;;
+  *)
+  echo "error number ${1}"
+  ;;
+  esac
+  return 0
+}
+
+check_arg() {
+  if [[ "$#" != "1" ]]
+  then 
+    return 1
+  fi
+  COUNT=`echo "${1}" | grep ' ' | wc -l | awk '{$1=$1; print}' `
+
+  if [[ "$COUNT" != "0" ]]
+  then 
+    return 2
+  fi
+  return 0
+}
+
+check_var() {
+  if [[ "$#" != "1" ]]
+  then 
+    return 1
+  fi
+  VALUE="${!1}"
+  TRIMMED="`echo "${VALUE}" | awk '{$1=$1; print}'`"
+  if [[ "${TRIMMED}" == "" ]]
+  then
+    echo "error checking variable '${1}'"
+    return 3
+  fi
+  echo "env ${1} = ${VALUE}"
+  return 0
+}
+
+stop_container() {
+  check_arg $@
+  RESULT=$?
+  if [[ "${RESULT}" != '0' ]]
+  then 
+    echo RESULT "${RESULT}"
+    return ${RESULT}
+  fi
+  docker stop "${1}" 2>/dev/null
+  return $?
+}
+
+remove_container() {
+  check_arg $@
+  RESULT=$?
+  if [[ "${RESULT}" != '0' ]]
+  then 
+    echo RESULT "${RESULT}"
+    return ${RESULT}
+  fi
+  docker rm "${1}" 2>/dev/null
+  return $?
+}
+
+remove_image() {
+  check_arg $@
+  RESULT=$?
+  if [[ "${RESULT}" != '0' ]]
+  then 
+    echo RESULT "${RESULT}"
+    return ${RESULT}
+  fi
+  docker rmi -f "${1}" 2>/dev/null
+  return $?
+}
+
+if [[ ! -f ./environment ]]
+then
+  echo "environment file missing"
+  exit 1
+fi
+
+if [[ ! -r ./environment ]]
+then
+  echo "environment file not readable"
+  exit 1
+fi
+
+. ./environment
+
+if [[ $# -gt 2 ]]
+then
+  echo "too many params"
+  exit 1
+fi
+
+if [[ "${1}" != "dev" ]]
+then
+  echo "first parameter must be 'dev' to indicate build type."
+  exit 1
+fi
+
+if [[ "${2}" == "" ]]
+then
+  echo "parameter 2 must be set."
+  exit 1
+fi
+
+export OMNET_DOCKER_USER_PASSWORD="${2}"
+
+for i in BUILD_DIR \
+TAG_ORG \
+TAG_PREFIX_OMNETSERVER \
+TAG_SERVER \
+TAG_ID_SERVER \
+TAG_PREFIX_SERVER \
+TAG_CLIENT \
+TAG_ID_CLIENT \
+TAG_PREFIX_CLIENT \
+OMNET_DOCKER_GIT_USER \
+OMNET_DOCKER_GIT_PASSWORD \
+OMNET_DOCKER_GIT_SERVER \
+OMNET_DOCKER_GIT_CLIENT \
+OMNET_DOCKER_BUILD \
+OMNET_DOCKER_NETWORK_TYPE \
+OMNET_DOCKER_LOGGING_LEVEL \
+YAML \
+OMNET_DOCKER_USER_PASSWORD \
+OMNET_DOCKER_PORT
+do
+  #echo "checking '${i}' = '${!i}'"
+  check_var "${i}"
+  RESULT=$?
+  if [[ "${RESULT}" != "0" ]]
+  then 
+    display_error_text "${RESULT}"
+    exit 1
+  fi
+done
+
+if [[ "`echo "${OMNET_DOCKER_PORT}" | egrep "^[0-9]*$" | wc -l | awk '{$1=$1; print}'`" != "1" ]]
+then
+  echo "variable OMNET_DOCKER_PORT value is not a number '${OMNET_DOCKER_PORT}'"
+  exit 1
+fi
+
+if [[ "${BUILD_DIR}" == "" ]]
+then
+  echo "\$BUILD_DIR not set"
+  exit 1
+fi
+
+if [[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "TRACE" ]] &&
+[[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "DEBUG" ]] &&
+[[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "INFO" ]] &&
+[[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "WARN" ]] &&
+[[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "ERROR" ]] &&
+[[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "FATAL" ]] &&
+[[ "${OMNET_DOCKER_LOGGING_LEVEL}" != "OFF" ]] 
+then 
+  echo "OMNET_DOCKER_LOGGING_LEVEL set to invalid value '${OMNET_DOCKER_LOGGING_LEVEL}'"
+  exit 1
+fi
+
+#DOCKER_FILTER="${TAG_PREFIX_SERVER}|${TAG_PREFIX_CLIENT}|${TAG_PREFIX_CONSUMER}"
+DOCKER_FILTER="${TAG_PREFIX_OMNETSERVER}"
+
+for i in ` (docker ps 2>&1) | grep -v 'CONTAINER ID' | \
+  egrep "${DOCKER_FILTER}" | cut -d' ' -f1`
+do
+  echo "stop container $i"
+  stop_container $i
+  RESULT=$?
+  if [[ "${RESULT}" != "0" ]]
+  then 
+    display_error_text "${RESULT}"
+    exit 1
+  fi
+done
+
+for i in ` (docker ps --all 2>&1) | grep -v 'CONTAINER ID' | \
+  egrep "${DOCKER_FILTER}" | cut -d' ' -f1`
+do
+  echo "remove container $i"
+  remove_container $i
+  RESULT=$?
+  if [[ "${RESULT}" != "0" ]]
+  then 
+    display_error_text "${RESULT}"
+    exit 1
+  fi
+done
+
+for i in ` (docker images -a 2>&1) | grep -v 'REPOSITORY' | \
+  egrep "${DOCKER_FILTER}" | awk '{ print $2 }' `
+do
+  echo "remove image '$i'"
+  remove_image $i
+  RESULT=$?
+  if [[ "${RESULT}" != "0" ]]
+  then 
+    display_error_text "${RESULT}"
+    exit 1
+  fi
+done
+
+for i in ` (docker ps --all 2>&1) | grep -v 'CONTAINER ID' | \
+  egrep "${DOCKER_FILTER}" | cut -d' ' -f1`
+do
+  echo "failed container still exists ${i}"
+  exit 1
+done
+
+for i in ` (docker images -a 2>&1) | grep -v 'REPOSITORY' | \
+  egrep "${DOCKER_FILTER}" | awk '{ print $3 }' `
+do
+  echo "failed image still exists ${i}"
+  exit 1
+done
+
+cd ..
+
+if [[ -d "$BUILD_DIR"  ]]
+then
+  rm -fr "$BUILD_DIR" 2>/dev/null
+fi
+
+if [[ -d "$BUILD_DIR"  ]]
+then
+  echo "dir '$BUILD_DIR' could not be deleted"
+  exit 1
+fi
+
+mkdir -p "$BUILD_DIR"
+
+if [[ ! -d "$BUILD_DIR" ]]
+then
+  echo "dir '$BUILD_DIR' could not be created"
+  exit 1
+fi
+
+if [[ ! -f "${YAML}" ]]
+then
+  echo "file '${YAML}' is missing "
+  exit 1
+fi
+ 
+for i in "./artefact/application.properties" "./artefact/startup.sh" "./artefact/authorized_keys" "./artefact/install.sh" "./artefact/install.sql" 
+do
+  if [ ! -f "${i}" ]
+  then
+    echo "mandatory keys file '${i}' missing"
+    exit 1
+  else
+    cp -ip "${i}" build/`basename "${i}"`
+  fi
+done
+
+echo -n "${OMNET_DOCKER_USER_PASSWORD}" > build/rootpassword
+
+echo -n "${OMNET_DOCKER_USER_PASSWORD}" > build/password
+
+cd ./build
+
+if [[ "$?" != "0" ]]
+then
+  echo "cd into build failed"
+  exit 1
+fi
+
+( sed -i.bak1 "s|NNNNN|${OMNET_DOCKER_USER_PASSWORD}|" install.sh )    && \
+( sed -i.bak1 "s|NNNNN|${OMNET_DOCKER_USER_PASSWORD}|" install.sql )
+
+if [[ "$?" != "0" ]]
+then
+  echo "bulk sed of password failed"
+  exit 1
+fi
+
+cd ..
+
+( docker compose -p ${TAG_ORG} -f "${YAML}" build ) && \
+( docker compose -p ${TAG_ORG} -f "${YAML}" up -d )
+
+docker ps --all
+
+rm -fr "./build/*"
+
+docker exec -it "${TAG_ORG}" bash
+

@@ -1,0 +1,274 @@
+# Dockerfile
+
+# Use the official Ubuntu 24.04 base image
+FROM ubuntu:24.04
+
+# Set shell
+SHELL ["/bin/sh", "-c"]
+
+# Environment
+ARG OMNET_DOCKER_PORT=default_value
+ARG OMNET_DOCKER_GITUSER=default_value
+ARG OMNET_DOCKER_GITSERVER=default_value
+ARG OMNET_DOCKER_GITCLIENT=default_value
+ARG OMNET_DOCKER_GITPASSWORD=default_value
+ARG OMNET_DOCKER_LOGGING_LEVEL=default_value
+ARG OMNET_DOCKER_USER_PASSWORD=default_value
+
+ARG DOCKER_INSTALL_DIR=/usr/local/src
+ARG DOCKER_INSTALL_DIR_SQL=${DOCKER_INSTALL_DIR}/sql
+ARG DOCKER_LOG_DIR=/var/log
+ARG DOCKER_INSTALL_CACHEDIR=/var/lib/apt/lists
+ARG DOCKER_SERVERHOSTNAME=localhost
+ARG SSL_CERTDIR=/etc/ssl/certs/${DOCKER_SERVERHOSTNAME}
+ARG APACHE_CONFIG_DIR=/etc/apache2
+ARG HOMEDIR=/root
+ 
+# Info
+RUN bash -c "echo starting using github user ${OMNET_DOCKER_GITUSER} building ${OMNET_DOCKER_GITSERVER}, ${OMNET_DOCKER_GITCLIENT}, ${OMNET_DOCKER_GITCONSUMER}"
+
+# Install apt-utils
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y apt-utils && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install Java
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-21-jdk && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install net-tools
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y net-tools && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install apache2
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y apache2 && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install certbot python3-certbot-apache
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-apache && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install other named tools
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y git software-properties-common curl wget openssl gosu openssh-server xemacs21 unzip zip vim && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install build tools
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install mysql client
+#RUN apt-get update && \
+#  DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-client && \
+#  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install mysql
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+
+# Install tini
+RUN apt-get update && \
+  DEBIAN_FRONTEND=noninteractive apt-get install -y tini && \
+  rm -rf ${DOCKER_INSTALL_CACHEDIR}/*
+    
+# Certs
+
+RUN if [ ! -d ${SSL_CERTDIR} ]; then mkdir "${SSL_CERTDIR}"; fi; if [ ! -d "${SSL_CERTDIR}" ]; then echo "${SSL_CERTDIR} dir missing"; exit 1; fi
+
+# 2048 RSA key
+RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ${SSL_CERTDIR}/${DOCKER_SERVERHOSTNAME}.key \
+    -out ${SSL_CERTDIR}/${DOCKER_SERVERHOSTNAME}.crt -subj "/C=US/ST=DC/L=Washington, DC/O=Omnet/OU=Org/CN=${DOCKER_SERVERHOSTNAME}"
+
+# Install server
+WORKDIR ${DOCKER_INSTALL_DIR}
+
+RUN echo git clone "https://${OMNET_DOCKER_GITUSER}:${OMNET_DOCKER_GITPASSWORD}@github.com/${OMNET_DOCKER_GITUSER}/${OMNET_DOCKER_GITSERVER}.git"
+
+RUN git clone "https://${OMNET_DOCKER_GITUSER}:${OMNET_DOCKER_GITPASSWORD}@github.com/${OMNET_DOCKER_GITUSER}/${OMNET_DOCKER_GITSERVER}.git"
+
+COPY ./application.properties ${DOCKER_INSTALL_DIR}/application.properties
+
+WORKDIR ${DOCKER_INSTALL_DIR}/${OMNET_DOCKER_GITSERVER}/omnet-server/main/resources
+
+RUN if [ ! -f ./application.properties ]; then echo "missing ./application.properties in `pwd` "; exit 1; fi
+
+RUN echo "" >> ./application.properties
+
+RUN cat ${DOCKER_INSTALL_DIR}/application.properties >> ./application.properties
+
+# Update LOGLEVEL
+ARG LHS1=LOGLEVEL
+ARG RHS1="${OMNET_DOCKER_LOGGING_LEVEL}"
+RUN sed -i.bak1 "s|${LHS1}|${RHS1}|" application.properties
+
+# Update PASSWORD
+ARG LHS2=PASSWORD
+ARG RHS2="${OMNET_DOCKER_USER_PASSWORD}"
+RUN sed -i.bak2 "s|${LHS2}|${RHS2}|" application.properties
+
+# Update PORT
+ARG LHS3=PORT
+ARG RHS3="${OMNET_DOCKER_PORT}"
+RUN sed -i.bak3 "s|${LHS3}|${RHS3}|" application.properties
+
+# Setup ssh
+
+WORKDIR ${HOMEDIR}
+
+RUN if [ ! -d .ssh ]; then mkdir .ssh; fi; if [ ! -d .ssh ]; then echo ".ssh dir missing"; exit 1; fi
+
+RUN chmod 700 .ssh 
+
+WORKDIR ${HOMEDIR}/.ssh 
+
+COPY ./authorized_keys ${DOCKER_INSTALL_DIR}/authorized_keys 
+
+RUN if [ -f ${HOMEDIR}/.ssh/authorized_keys ]; then (echo "" >> ${HOMEDIR}/.ssh/authorized_keys); fi    
+
+RUN cat ${DOCKER_INSTALL_DIR}/authorized_keys >> ${HOMEDIR}/.ssh/authorized_keys
+
+RUN chmod 600 ${HOMEDIR}/.ssh/authorized_keys
+
+RUN service ssh start ; sleep 10 ; service ssh stop 
+
+# Create startup
+
+WORKDIR /
+
+COPY ./startup.sh startup.sh
+
+RUN chmod 555 startup.sh
+
+# Apache modules
+RUN a2enmod ssl
+RUN a2ensite default-ssl.conf
+RUN a2enmod proxy
+RUN a2enmod proxy_http
+RUN a2enmod headers
+RUN apachectl stop
+
+# Set the working directory
+WORKDIR ${APACHE_CONFIG_DIR}/sites-enabled
+
+RUN mv -f default-ssl.conf default-ssl.conf.bak0
+
+RUN cp -f default-ssl.conf.bak0 default-ssl.conf 
+
+# Update apache ssl conf
+ARG LHS4=/etc/ssl/certs/ssl-cert-snakeoil.pem
+ARG RHS4=${SSL_CERTDIR}/${DOCKER_SERVERHOSTNAME}.crt
+RUN sed -i.bak4 "s|${LHS4}|${RHS4}|" default-ssl.conf
+
+ARG LHS5=/etc/ssl/private/ssl-cert-snakeoil.key
+ARG RHS5=${SSL_CERTDIR}/${DOCKER_SERVERHOSTNAME}.key
+RUN sed -i.bak5 "s|${LHS5}|${RHS5}|" default-ssl.conf
+
+ARG LHS6=SSLEngine off
+ARG RHS6=SSLEngine on
+RUN sed -i.bak6 "s|${LHS6}|${RHS6}|" default-ssl.conf
+
+ARG LHS7='SSLEngine on'
+ARG RHS7='\nServerName FOOBAR2\nServerAlias FOOBAR2\nSSLEngine on\nSSLProtocol -all +TLSv1.2 +TLSv1.3\nSSLCipherSuite HIGH:!aNULL:!MD5:!3DES:!CAMELLIA\nSSLHonorCipherOrder on\nHeader always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"\nHeader always set X-Content-Type-Options "nosniff"\nHeader always set X-Frame-Options "SAMEORIGIN"\nHeader always set Referrer-Policy "strict-origin-when-cross-origin"\nFOOBAR1\nHeader always set X-XSS-Protection "1; mode=block"\n'
+RUN sed -i.bak7 "s|${LHS7}|${RHS7}|" default-ssl.conf
+
+ARG LHS8='FOOBAR1'
+ARG RHS8='\nHeader always set Content-Security-Policy "default-src SINGLEQUOTE1noneSINGLEQUOTE2; frame-ancestors SINGLEQUOTE3noneSINGLEQUOTE4;"\n'
+RUN sed -i.bak81 "s|${LHS8}|${RHS8}|" default-ssl.conf
+RUN sed -i.bak82 "s|SINGLEQUOTE[1-4]|'|g" default-ssl.conf
+
+ARG LHS9='FOOBAR2'
+ARG RHS9="${DOCKER_SERVERHOSTNAME}"
+RUN sed -i.bak9 "s|${LHS9}|${RHS9}|" default-ssl.conf
+
+# Config
+RUN cp -f default-ssl.conf default-ssl.conf.CHECKPOINT
+
+RUN mv -f 000-default.conf 000-default.conf.CHECKPOINT
+
+RUN if [ ! -f default-ssl.conf ] || [ ! -f default-ssl.conf.CHECKPOINT ]; then echo "missing default-ssl.conf or .CHECKPOINT "; exit 1; fi
+
+RUN if [ ! -f 000-default.conf.CHECKPOINT ]; then echo "missing 000-default.conf.CHECKPOINT or copy "; exit 1; fi
+
+RUN awk 'BEGIN { found = 0; RS = "\0"; ORS = ""; }                         \
+     /<\/Directory>[[:space:]\n]*<\/VirtualHost>/ && !found {              \
+         sub(/<\/Directory>[[:space:]\n]*<\/VirtualHost>/, "\n</Directory>\n\nProxyPreserveHost On\nProxyPass / http://FOOBAR3/\nProxyPassReverse / http://FOOBAR3/\n</VirtualHost>"); \
+         found = 1;                                                        \
+     }                                                                     \
+     { print; }' default-ssl.conf.CHECKPOINT > default-ssl.conf
+
+ARG LHS10='FOOBAR3'
+ARG RHS10="${DOCKER_SERVERHOSTNAME}:${OMNET_DOCKER_PORT}"
+RUN sed -i.bak10 "s|${LHS10}|${RHS10}|" default-ssl.conf
+
+RUN awk 'BEGIN { found = 0; RS = "\0"; ORS = ""; }                         \
+     /[[:space:]\n]*<\/VirtualHost>/ && !found {              \
+         sub(/[[:space:]\n]*<\/VirtualHost>/, "\n\nProxyPreserveHost On\nProxyPass / http://FOOBAR3/\nProxyPassReverse / http://FOOBAR3/\n</VirtualHost>"); \
+         found = 1;                                                        \
+     }                                                                     \
+     { print; }' 000-default.conf.CHECKPOINT > 000-default.conf
+
+ARG LHS11='FOOBAR3'
+ARG RHS11="${DOCKER_SERVERHOSTNAME}:${OMNET_DOCKER_PORT}"
+RUN sed -i.bak11 "s|${LHS11}|${RHS11}|" 000-default.conf
+     
+RUN apachectl start
+
+RUN echo "." > /var/www/html/index.html
+
+# DB
+
+WORKDIR ${DOCKER_INSTALL_DIR}
+
+RUN mkdir sql
+
+RUN if [ ! -d "${DOCKER_INSTALL_DIR_SQL}" ]; then mkdir "${DOCKER_INSTALL_DIR_SQL}"; fi; if [ ! -d "${DOCKER_INSTALL_DIR_SQL}" ]; then echo "${DOCKER_INSTALL_DIR_SQL} dir missing"; exit 1; fi 
+
+WORKDIR ${DOCKER_INSTALL_DIR_SQL}
+
+COPY ./install.sh install.sh
+
+RUN chmod +x install.sh
+
+COPY ./install.sql install.sql
+
+RUN ( mysqld & ) ; \
+  sleep 30 && \
+  ./install.sh
+
+RUN rm -fr install.sh install.sql
+
+COPY ./rootpassword rootpassword
+
+COPY ./password password
+
+RUN ( echo "" >> ~/.bashrc && echo "alias sql='mysql -u root -p`cat ${DOCKER_INSTALL_DIR_SQL}/rootpassword` -h 127.0.0.1 omnet '" >> ~/.bashrc )
+
+# Build server
+
+WORKDIR ${DOCKER_INSTALL_DIR}/${OMNET_DOCKER_GITSERVER}/bin
+
+RUN ./c
+
+# Expose
+
+EXPOSE 22
+EXPOSE 80
+EXPOSE 443
+EXPOSE ${OMNET_DOCKER_PORT}
+EXPOSE 3306
+
+# # Startup
+
+WORKDIR ${DOCKER_INSTALL_DIR}
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+CMD ["/startup.sh"]
+
+

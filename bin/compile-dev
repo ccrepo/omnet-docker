@@ -1,0 +1,6 @@
+#!/bin/bash 
+
+export OMNET_DOCKER_USER_PASSWORD="`LC_ALL=C < /dev/urandom tr -dc 'A-Za-z0-9_' | head -c $((12 + RANDOM % 13))`"
+
+. ./compile dev "${OMNET_DOCKER_USER_PASSWORD}"
+

@@ -23,6 +23,7 @@ ARG DOCKER_SERVERHOSTNAME=localhost
 ARG SSL_CERTDIR=/etc/ssl/certs/${DOCKER_SERVERHOSTNAME}
 ARG APACHE_CONFIG_DIR=/etc/apache2
 ARG HOMEDIR=/root
+ARG LOGDIR=/var/logs
  
 # Info
 RUN bash -c "echo starting using github user ${OMNET_DOCKER_GITUSER} building ${OMNET_DOCKER_GITSERVER}, ${OMNET_DOCKER_GITCLIENT}, ${OMNET_DOCKER_GITCONSUMER}"
@@ -88,6 +89,10 @@ RUN openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ${SSL_CERTDIR}/$
 # Install server
 WORKDIR ${DOCKER_INSTALL_DIR}
 
+RUN echo git clone "https://${OMNET_DOCKER_GITUSER}:${OMNET_DOCKER_GITPASSWORD}@github.com/${OMNET_DOCKER_GITUSER}/${OMNET_DOCKER_GITCLIENT}.git"
+
+RUN git clone "https://${OMNET_DOCKER_GITUSER}:${OMNET_DOCKER_GITPASSWORD}@github.com/${OMNET_DOCKER_GITUSER}/${OMNET_DOCKER_GITCLIENT}.git"
+
 RUN echo git clone "https://${OMNET_DOCKER_GITUSER}:${OMNET_DOCKER_GITPASSWORD}@github.com/${OMNET_DOCKER_GITUSER}/${OMNET_DOCKER_GITSERVER}.git"
 
 RUN git clone "https://${OMNET_DOCKER_GITUSER}:${OMNET_DOCKER_GITPASSWORD}@github.com/${OMNET_DOCKER_GITUSER}/${OMNET_DOCKER_GITSERVER}.git"
@@ -116,6 +121,15 @@ RUN sed -i.bak2 "s|${LHS2}|${RHS2}|" application.properties
 ARG LHS3=PORT
 ARG RHS3="${OMNET_DOCKER_PORT}"
 RUN sed -i.bak3 "s|${LHS3}|${RHS3}|" application.properties
+
+# Log dir
+WORKDIR ${LOGDIR}
+
+RUN mkdir omnet 
+
+RUN if [ ! -d ${LOGDIR}/omnet ]; then echo "'${LOGDIR}/omnet' dir missing"; exit 1; fi
+
+WORKDIR ${LOGDIR}/omnet
 
 # Setup ssh
 
@@ -252,6 +266,12 @@ RUN ( echo "" >> ~/.bashrc && echo "alias sql='mysql -u root -p`cat ${DOCKER_INS
 # Build server
 
 WORKDIR ${DOCKER_INSTALL_DIR}/${OMNET_DOCKER_GITSERVER}/bin
+
+RUN ./c
+
+# Build client
+
+WORKDIR ${DOCKER_INSTALL_DIR}/${OMNET_DOCKER_GITCLIENT}/bin
 
 RUN ./c
 

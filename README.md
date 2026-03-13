@@ -36,7 +36,7 @@ cd bin
 
 Spring API available at the following:
 
-Post is configurable (with default 8001)
+Post is configurable (with default 8081)
 
 GET http://localhost:port/api/user/ - get user data 
 
@@ -61,7 +61,9 @@ ls -l *culr* *wget*
 
 The following components are built, configured and delployed.
 
-activemq-server to springbbot boot server
+omnet-server to springboot boot server
+
+omnet-client client to talk to the omnet server.
 
 ```bash
 cd bin

@@ -6,7 +6,7 @@ trap "kill 0" SIGTERM SIGINT
 apachectl -DFOREGROUND &
 
 # ssh
-/usr/sbin/sshd -D & 
+#/usr/sbin/sshd -D & 
 
 # mysql
 mysqld & 

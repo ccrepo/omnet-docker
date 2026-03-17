@@ -1,42 +1,5 @@
 #!/bin/bash
 
-display_error_text() {
-  if [[ "$#" != "1" ]]
-  then 
-    echo "unknown error"
-    return 1
-  fi
-  case ${1} in 
-  1)
-  echo "too many args error"
-  ;;
-  2)
-  echo "invalid argument error"
-  ;;
-  3)
-  echo "variable not set"
-  ;;
-  *)
-  echo "error number ${1}"
-  ;;
-  esac
-  return 0
-}
-
-check_arg() {
-  if [[ "$#" != "1" ]]
-  then 
-    return 1
-  fi
-  COUNT=`echo "${1}" | grep ' ' | wc -l | awk '{$1=$1; print}' `
-
-  if [[ "$COUNT" != "0" ]]
-  then 
-    return 2
-  fi
-  return 0
-}
-
 check_var() {
   if [[ "$#" != "1" ]]
   then 
@@ -53,51 +16,20 @@ check_var() {
   return 0
 }
 
-stop_container() {
-  check_arg $@
-  RESULT=$?
-  if [[ "${RESULT}" != '0' ]]
-  then 
-    echo RESULT "${RESULT}"
-    return ${RESULT}
-  fi
-  docker stop "${1}" 2>/dev/null
-  return $?
-}
+# stop all containers
+docker stop $(docker ps -q)
 
-remove_container() {
-  check_arg $@
-  RESULT=$?
-  if [[ "${RESULT}" != '0' ]]
-  then 
-    echo RESULT "${RESULT}"
-    return ${RESULT}
-  fi
-  docker rm "${1}" 2>/dev/null
-  return $?
-}
+# remove all containers
+#docker rm $(docker ps -a -q)
+( docker ps -a --filter "name=omnet" -q | xargs docker rm -f ) 2>/dev/null 
 
-remove_image() {
-  check_arg $@
-  RESULT=$?
-  if [[ "${RESULT}" != '0' ]]
-  then 
-    echo RESULT "${RESULT}"
-    return ${RESULT}
-  fi
-  docker rmi -f "${1}" 2>/dev/null
-  return $?
-}
+# remove all images
+#docker rmi -f $(docker images -q)
+( docker images --filter "reference=omnet*/*" -q | xargs docker rmi -f ) 2>/dev/null 
 
-if [[ ! -f ./environment ]]
+if [[ ! -f ./environment ]] || [[ ! -r ./environment ]]
 then
   echo "environment file missing"
-  exit 1
-fi
-
-if [[ ! -r ./environment ]]
-then
-  echo "environment file not readable"
   exit 1
 fi
 
@@ -148,7 +80,7 @@ do
   RESULT=$?
   if [[ "${RESULT}" != "0" ]]
   then 
-    display_error_text "${RESULT}"
+    echo "error: variable '${i}' not set properly"
     exit 1
   fi
 done
@@ -179,45 +111,6 @@ fi
 
 #DOCKER_FILTER="${TAG_PREFIX_SERVER}|${TAG_PREFIX_CLIENT}|${TAG_PREFIX_CONSUMER}"
 DOCKER_FILTER="${TAG_PREFIX_OMNETSERVER}"
-
-for i in ` (docker ps 2>&1) | grep -v 'CONTAINER ID' | \
-  egrep "${DOCKER_FILTER}" | cut -d' ' -f1`
-do
-  echo "stop container $i"
-  stop_container $i
-  RESULT=$?
-  if [[ "${RESULT}" != "0" ]]
-  then 
-    display_error_text "${RESULT}"
-    exit 1
-  fi
-done
-
-for i in ` (docker ps --all 2>&1) | grep -v 'CONTAINER ID' | \
-  egrep "${DOCKER_FILTER}" | cut -d' ' -f1`
-do
-  echo "remove container $i"
-  remove_container $i
-  RESULT=$?
-  if [[ "${RESULT}" != "0" ]]
-  then 
-    display_error_text "${RESULT}"
-    exit 1
-  fi
-done
-
-for i in ` (docker images -a 2>&1) | grep -v 'REPOSITORY' | \
-  egrep "${DOCKER_FILTER}" | awk '{ print $2 }' `
-do
-  echo "remove image '$i'"
-  remove_image $i
-  RESULT=$?
-  if [[ "${RESULT}" != "0" ]]
-  then 
-    display_error_text "${RESULT}"
-    exit 1
-  fi
-done
 
 for i in ` (docker ps --all 2>&1) | grep -v 'CONTAINER ID' | \
   egrep "${DOCKER_FILTER}" | cut -d' ' -f1`
@@ -302,4 +195,3 @@ docker ps --all
 rm -fr "./build/*"
 
 docker exec -it "${TAG_ORG}" bash
-
